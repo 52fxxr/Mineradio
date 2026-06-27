@@ -29,6 +29,10 @@
       --lyric-edge:rgba(4,6,12,.42);
       --lyric-drop:rgba(156,255,223,.38);
       --lyric-drop-paused:rgba(156,255,223,.22);
+      --lyric-prev-opacity:0.38;
+      --lyric-next-opacity:0.42;
+      --lyric-line-gap:0.42em;
+      --lyric-secondary-font-size:0.68em;
     }
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}
     body{opacity:0;transition:opacity .22s ease;-webkit-app-region:no-drag}
@@ -54,7 +58,10 @@
     .lyric-viewport{
       position:relative;
       z-index:2;
-      display:block;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
       width:min(100%,1120px);
       max-width:calc(100vw - 24px);
       margin:0 auto;
@@ -69,6 +76,7 @@
       filter:drop-shadow(0 1px 2.4px rgba(4,6,12,.58)) drop-shadow(0 0 4.8px rgba(4,6,12,.30));
       transform:translateZ(0);
       will-change:transform,filter;
+      gap:var(--lyric-line-gap);
     }
     body.unlocked .stage.hint-visible .lyric-viewport{pointer-events:auto;cursor:move;-webkit-app-region:no-drag}
     .lyric-scroll{
@@ -121,6 +129,51 @@
     }
     .line.in{animation:lyr-in 820ms cubic-bezier(.16,.84,.32,1.02) forwards}
     body.paused .line{filter:none;opacity:.84}
+    .lyric-row-prev,.lyric-row-next{
+      display:none;
+      flex-direction:row;
+      align-items:center;
+      justify-content:center;
+      width:100%;
+      overflow:hidden;
+    }
+    body.multiline-2 .lyric-row-prev,
+    body.multiline-3 .lyric-row-prev,
+    body.multiline-3 .lyric-row-next{display:flex}
+    .line-secondary{
+      position:relative;
+      z-index:1;
+      display:inline-block;
+      max-width:none;
+      color:#fff;
+      font-family:var(--lyric-font);
+      font-size:var(--lyric-secondary-font-size);
+      font-weight:var(--lyric-weight);
+      line-height:var(--lyric-line-height);
+      letter-spacing:var(--lyric-letter-spacing);
+      text-align:center;
+      white-space:nowrap;
+      overflow:visible;
+      text-overflow:clip;
+      padding:.20em .12em .34em;
+      margin:-.20em -.12em -.34em;
+      background:linear-gradient(90deg,var(--lyric-primary),var(--lyric-primary));
+      -webkit-background-clip:text;
+      background-clip:text;
+      -webkit-text-fill-color:transparent;
+      -webkit-text-stroke:.12px rgba(255,255,255,.48);
+      paint-order:stroke fill;
+      text-shadow:0 0 1px rgba(255,255,255,.22),0 0 4px var(--lyric-shadow-glow);
+      opacity:var(--lyric-prev-opacity);
+      transform:translate3d(0,0,0) scale(.94);
+      transform-origin:center;
+      backface-visibility:hidden;
+      will-change:opacity,transform;
+      transition:opacity 520ms cubic-bezier(.16,.84,.32,1.02),transform 520ms cubic-bezier(.16,.84,.32,1.02);
+    }
+    .lyric-row-next .line-secondary{opacity:var(--lyric-next-opacity);transform:translate3d(0,0,0) scale(.92)}
+    .lyric-row-prev .line-secondary.in{opacity:var(--lyric-prev-opacity);transform:translate3d(0,0,0) scale(.94)}
+    .lyric-row-next .line-secondary.in{opacity:var(--lyric-next-opacity);transform:translate3d(0,0,0) scale(.92)}
     .lock-hint{
       position:absolute;
       z-index:4;
@@ -187,7 +240,11 @@
   <canvas id="fx"></canvas>
   <div class="wrap">
     <div id="stage" class="stage">
-      <div id="lyricViewport" class="lyric-viewport"><div id="lyricScroller" class="lyric-scroll"><div id="line" class="line" data-text="Mineradio">Mineradio</div></div></div>
+      <div id="lyricViewport" class="lyric-viewport">
+        <div id="lyricRowPrev" class="lyric-row-prev"><div id="lyricScrollerPrev" class="lyric-scroll"><div id="linePrev" class="line-secondary" data-text=""></div></div></div>
+        <div id="lyricScroller" class="lyric-scroll"><div id="line" class="line" data-text="Mineradio">Mineradio</div></div>
+        <div id="lyricRowNext" class="lyric-row-next"><div id="lyricScrollerNext" class="lyric-scroll"><div id="lineNext" class="line-secondary" data-text=""></div></div></div>
+      </div>
       <div id="lockHint" class="lock-hint"><span class="lock-icon"></span><span id="lockText">&#20013;&#38190;&#35299;&#38145;</span><button id="closeLyricsBtn" class="lyrics-close" type="button" aria-label="Close desktop lyrics">&#20851;&#38381;&#26700;&#38754;&#27468;&#35789;</button></div>
     </div>
   </div>
@@ -198,11 +255,17 @@
     var stage = document.getElementById('stage');
     var lyricViewport = document.getElementById('lyricViewport');
     var line = document.getElementById('line');
+    var linePrev = document.getElementById('linePrev');
+    var lineNext = document.getElementById('lineNext');
+    var lyricRowPrev = document.getElementById('lyricRowPrev');
+    var lyricRowNext = document.getElementById('lyricRowNext');
     var lockHint = document.getElementById('lockHint');
     var lockText = document.getElementById('lockText');
     var closeLyricsBtn = document.getElementById('closeLyricsBtn');
     var dpr = 1;
     var lastText = '';
+    var lastPrevText = '';
+    var lastNextText = '';
     var progressText = '';
     var displayedProgress = 0;
     var baseFontSize = 58;
@@ -228,6 +291,7 @@
       lyricGlow:true,lyricGlowBeat:true,lyricGlowStrength:.35,highBloom:0,beatGlow:0,beatPulse:0,bass:0,feather:.055,
       fontFamily:'Inter,"Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif',
       fontWeight:900,letterSpacing:0,lineHeight:1,lyricScale:1,
+      prevText:'',nextText:'',lineCount:1,
       colors:{primary:'#f6fdff',secondary:'#a8f6ff',highlight:'#fff0b8',glow:'#9cffdf'},
       displayColors:{primary:'#f6fdff',secondary:'#a8f6ff',highlight:'#fff0b8',glow:'#9cffdf'}
     };
@@ -591,11 +655,14 @@
       var maxHeight = Math.max(64, innerHeight - 188);
       var nextLayoutKey = [
         line.textContent || '',
+        linePrev.textContent || '',
+        lineNext.textContent || '',
         baseFontSize,
         state.fontFamily,
         state.fontWeight,
         state.letterSpacing,
         state.lineHeight,
+        state.lineCount,
         innerWidth,
         innerHeight
       ].join('|');
@@ -760,6 +827,11 @@
       setRootVar('--lyric-weight', String(state.fontWeight));
       setRootVar('--lyric-line-height', String(state.lineHeight));
       setRootVar('--lyric-feather', (state.feather * 100).toFixed(2) + '%');
+      state.lineCount = clamp(state.lineCount || (next && next.lineCount), 1, 3, 1);
+      var prevText = String(state.prevText || '').replace(/\s+/g, ' ').trim();
+      var nextText = String(state.nextText || '').replace(/\s+/g, ' ').trim();
+      document.body.classList.toggle('multiline-2', state.lineCount >= 2);
+      document.body.classList.toggle('multiline-3', state.lineCount >= 3);
       document.body.classList.toggle('show', !!state.enabled);
       document.body.classList.toggle('paused', !state.playing);
       document.body.classList.toggle('highlight', state.highlightFollow === true);
@@ -781,6 +853,24 @@
         line.setAttribute('data-text', text);
         layoutKey = '';
         replayLineAnimation();
+      }
+      if (prevText !== lastPrevText) {
+        lastPrevText = prevText;
+        linePrev.textContent = prevText;
+        linePrev.setAttribute('data-text', prevText);
+        linePrev.classList.remove('in');
+        if (prevText) void linePrev.offsetWidth;
+        if (prevText) linePrev.classList.add('in');
+        layoutKey = '';
+      }
+      if (nextText !== lastNextText) {
+        lastNextText = nextText;
+        lineNext.textContent = nextText;
+        lineNext.setAttribute('data-text', nextText);
+        lineNext.classList.remove('in');
+        if (nextText) void lineNext.offsetWidth;
+        if (nextText) lineNext.classList.add('in');
+        layoutKey = '';
       }
       fitLyricText(false);
     }

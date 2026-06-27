@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, session, globalShortcut, dialog, nativeImage } = require('electron');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
@@ -23,6 +23,8 @@ let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
 const registeredGlobalHotkeys = new Map();
+let mediaSessionState = { playing: false, title: '', artist: '', cover: '' };
+let mediaSystemKeysRegistered = false;
 
 const WINDOWED_ASPECT = 16 / 9;
 const WINDOWED_SCALE = 3 / 4;
@@ -172,6 +174,94 @@ function configureMineradioGlobalHotkeys(bindings = []) {
     }
   }
   return { ok: true, results };
+}
+
+function registerSystemMediaKeys() {
+  if (mediaSystemKeysRegistered) return;
+  mediaSystemKeysRegistered = true;
+  const keys = [
+    { accelerator: 'MediaPlayPause', action: 'togglePlay' },
+    { accelerator: 'MediaNextTrack', action: 'nextTrack' },
+    { accelerator: 'MediaPreviousTrack', action: 'prevTrack' },
+  ];
+  for (const item of keys) {
+    try {
+      globalShortcut.register(item.accelerator, () => sendGlobalHotkeyAction(item.action));
+    } catch (e) {
+      console.warn('Failed to register system media key:', item.accelerator, e.message);
+    }
+  }
+}
+
+function unregisterSystemMediaKeys() {
+  if (!mediaSystemKeysRegistered) return;
+  mediaSystemKeysRegistered = false;
+  const keys = ['MediaPlayPause', 'MediaNextTrack', 'MediaPreviousTrack'];
+  for (const accelerator of keys) {
+    try { globalShortcut.unregister(accelerator); } catch (e) {}
+  }
+}
+
+function makeNativeIconFromSvg(svg) {
+  try {
+    const buffer = Buffer.from(
+      `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">${svg}</svg>`,
+      'utf-8'
+    );
+    return nativeImage.createFromBuffer(buffer, { scaleFactor: 2 });
+  } catch (e) {
+    return nativeImage.createEmpty();
+  }
+}
+
+function updateThumbarButtons() {
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+  const playSvg = '<polygon points="11,8 24,16 11,24" fill="#ffffff"/>';
+  const pauseSvg = '<rect x="10" y="8" width="4" height="16" fill="#ffffff"/><rect x="18" y="8" width="4" height="16" fill="#ffffff"/>';
+  const prevSvg = '<polygon points="20,8 12,16 20,24" fill="#ffffff"/><rect x="8" y="8" width="2" height="16" fill="#ffffff"/>';
+  const nextSvg = '<polygon points="12,8 20,16 12,24" fill="#ffffff"/><rect x="22" y="8" width="2" height="16" fill="#ffffff"/>';
+  const buttons = [
+    {
+      tooltip: '上一首',
+      icon: makeNativeIconFromSvg(prevSvg),
+      click: () => sendGlobalHotkeyAction('prevTrack'),
+    },
+    {
+      tooltip: mediaSessionState.playing ? '暂停' : '播放',
+      icon: makeNativeIconFromSvg(mediaSessionState.playing ? pauseSvg : playSvg),
+      click: () => sendGlobalHotkeyAction('togglePlay'),
+    },
+    {
+      tooltip: '下一首',
+      icon: makeNativeIconFromSvg(nextSvg),
+      click: () => sendGlobalHotkeyAction('nextTrack'),
+    },
+  ];
+  try {
+    mainWindow.setThumbarButtons(buttons);
+  } catch (e) {
+    console.warn('setThumbarButtons failed:', e.message);
+  }
+}
+
+function updateMediaSessionState(payload) {
+  const next = payload || {};
+  mediaSessionState = {
+    playing: !!next.playing,
+    title: String(next.title || ''),
+    artist: String(next.artist || ''),
+    cover: String(next.cover || ''),
+  };
+  updateThumbarButtons();
+  if (process.platform === 'darwin') {
+    try {
+      const { setNowPlayingInfo, setNowPlayingPlaybackState } = require('electron').nativeTheme || {};
+      const electron = require('electron');
+      if (electron.app && electron.app.setUserActivity) {
+        // Electron 不提供直接 Now Playing API，通过 mediaSession IPC 已在 renderer 中处理
+      }
+    } catch (e) {}
+  }
 }
 
 function scheduleWindowStateSend(win, delay = 80) {
@@ -1125,6 +1215,15 @@ ipcMain.handle('mineradio-hotkeys-configure-global', (_event, bindings) => {
   return configureMineradioGlobalHotkeys(bindings);
 });
 
+ipcMain.handle('mineradio-media-state-update', async (_event, payload) => {
+  try {
+    updateMediaSessionState(payload);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('mineradio-export-json-file', async (event, payload = {}) => {
   try {
     const owner = getSenderWindow(event);
@@ -1386,6 +1485,8 @@ async function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     sendWindowState(mainWindow);
+    registerSystemMediaKeys();
+    updateThumbarButtons();
   });
 
   mainWindow.on('maximize', () => sendWindowState(mainWindow));
@@ -1460,6 +1561,7 @@ if (!gotSingleInstanceLock) {
 
   app.on('before-quit', () => {
     unregisterMineradioGlobalHotkeys();
+    unregisterSystemMediaKeys();
     closeOverlayWindows();
     if (localServer && localServer.close) localServer.close();
   });
