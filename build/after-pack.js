@@ -53,7 +53,7 @@ module.exports = async function afterPack(context) {
 
   const version = context.packager.appInfo.version;
   console.log(`  • injecting Mineradio resources  rcedit=${rceditPath}`);
-  execFileSync(rceditPath, [
+  var args = [
     exePath,
     '--set-icon', iconPath,
     '--set-version-string', 'FileDescription', 'Mineradio',
@@ -62,5 +62,11 @@ module.exports = async function afterPack(context) {
     '--set-version-string', 'OriginalFilename', `${appName}.exe`,
     '--set-file-version', version,
     '--set-product-version', version
-  ], { stdio: 'inherit' });
+  ];
+  if (process.platform !== 'win32') {
+    args.unshift(rceditPath);
+    execFileSync('wine', args, { stdio: 'inherit' });
+  } else {
+    execFileSync(rceditPath, args, { stdio: 'inherit' });
+  }
 };
