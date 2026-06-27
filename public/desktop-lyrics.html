@@ -31,8 +31,8 @@
       --lyric-drop-paused:rgba(156,255,223,.22);
       --lyric-prev-opacity:0.38;
       --lyric-next-opacity:0.42;
-      --lyric-line-gap:0.42em;
-      --lyric-secondary-font-size:0.68em;
+      --lyric-line-gap:calc(var(--lyric-size, 58px) * 0.42);
+      --lyric-secondary-font-size:calc(var(--lyric-size, 58px) * 0.68);
     }
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}
     body{opacity:0;transition:opacity .22s ease;-webkit-app-region:no-drag}
